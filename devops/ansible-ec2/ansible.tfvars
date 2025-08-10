@@ -1,0 +1,9 @@
+ami                    = "ami-0554aa6767e249943"
+instance_type          = "t2.micro"
+vpc_security_group_ids = ["sg-028b3615a05c2ac48"]
+key_name               = "jenkins"
+project_name           = "fqts-project-3"
+env                    = "dev"
+unique_ids             = ["ansible-control-node"]
+iam_instance_profile   = "fqts-ec2"
+user_data              = "setup.sh"
