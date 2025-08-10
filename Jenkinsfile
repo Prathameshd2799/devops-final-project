@@ -1,50 +1,59 @@
 pipeline {
   agent { label 'terraform' } // 🖥️ Run on passive Terraform node
- 
+
   environment {
     YAML_CONFIG = 'deployment-config.yaml'
   }
- 
+
   stages {
     stage('Init') {
       steps {
         script {
-          echo "🔍 Branch: ${env.BRANCH_NAME}"
- 
-          if (env.BRANCH_NAME.startsWith("PR-")) {
-            echo "🛠️ Detected PR from '${env.CHANGE_BRANCH}' to '${env.CHANGE_TARGET}'"
-            currentBuild.displayName = "#${env.BUILD_NUMBER} - PR from ${env.CHANGE_BRANCH} to ${env.CHANGE_TARGET}"
-            env.ENV_NAME = env.CHANGE_TARGET
+          echo "🔍 Branch: ${env.BRANCH_NAME ?: 'UNKNOWN'}"
+
+          if (env.BRANCH_NAME && env.BRANCH_NAME.startsWith("PR-")) {
+            echo "🛠️ Detected PR from '${env.CHANGE_BRANCH ?: 'UNKNOWN'}' to '${env.CHANGE_TARGET ?: 'UNKNOWN'}'"
+            currentBuild.displayName = "#${env.BUILD_NUMBER} - PR from ${env.CHANGE_BRANCH ?: 'UNKNOWN'} to ${env.CHANGE_TARGET ?: 'UNKNOWN'}"
+            env.ENV_NAME = env.CHANGE_TARGET ?: 'default'
             env.IS_PR = 'true'
           } else {
-            echo "🧪 Regular branch build: ${env.BRANCH_NAME}"
-            env.ENV_NAME = env.BRANCH_NAME
+            echo "🧪 Regular branch build: ${env.BRANCH_NAME ?: 'UNKNOWN'}"
+            env.ENV_NAME = env.BRANCH_NAME ?: 'default'
             env.IS_PR = 'false'
           }
         }
       }
     }
- 
+
     stage('Terraform Plan / Apply') {
       steps {
         script {
-          def config = readYaml file: "${YAML_CONFIG}"
+          if (!fileExists(YAML_CONFIG)) {
+            error "❌ Config file not found: ${YAML_CONFIG}"
+          }
+
+          def config = readYaml file: YAML_CONFIG
           def envConfig = config[env.ENV_NAME]
- 
+
           if (envConfig == null) {
- 
-    if (env.BRANCH_NAME.startsWith("feature/")) {
-      echo " No config found for feature branch '${env.BRANCH_NAME}'. Skipping build."
-      currentBuild.result = 'SUCCESS'
-      return
-    } else {
-      error "❌ No config found for environment: ${env.ENV_NAME}"
-    }
-  }
+            if (env.BRANCH_NAME?.startsWith("feature/")) {
+              echo " No config found for feature branch '${env.BRANCH_NAME}'. Skipping build."
+              currentBuild.result = 'SUCCESS'
+              return
+            } else {
+              error "❌ No config found for environment: ${env.ENV_NAME}"
+            }
+          }
+
           envConfig.each { componentName, component ->
             if (component.enable == true && component.disable == false) {
               echo "🚀 Running ${env.IS_PR == 'true' ? 'terraform plan' : 'terraform apply'} for: ${componentName}"
-              dir("${component.path}") {
+
+              if (!fileExists(component.path)) {
+                error "❌ Directory not found: ${component.path}"
+              }
+
+              dir(component.path) {
                 sh "terraform init"
                 sh "terraform validate"
                 sh "terraform plan -var-file=${component.tfvars}"
@@ -56,11 +65,13 @@ pipeline {
               }
             }
             else if (component.enable == true && component.disable == true) {
- 
               echo "⚠️ Running terraform destroy for: ${componentName}"
- 
-              dir("${component.path}") {
- 
+
+              if (!fileExists(component.path)) {
+                error "❌ Directory not found: ${component.path}"
+              }
+
+              dir(component.path) {
                 sh "terraform init"
                 sh "terraform validate"
                 sh "terraform plan"
@@ -79,7 +90,7 @@ pipeline {
       }
     }
   }
- 
+
   post {
     failure {
       echo "❌ Build failed!"
@@ -89,4 +100,3 @@ pipeline {
     }
   }
 }
-//test
