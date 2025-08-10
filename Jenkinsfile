@@ -1,0 +1,92 @@
+pipeline {
+  agent { label 'terraform' } // 🖥️ Run on passive Terraform node
+ 
+  environment {
+    YAML_CONFIG = 'deployment-config.yaml'
+  }
+ 
+  stages {
+    stage('Init') {
+      steps {
+        script {
+          echo "🔍 Branch: ${env.BRANCH_NAME}"
+ 
+          if (env.BRANCH_NAME.startsWith("PR-")) {
+            echo "🛠️ Detected PR from '${env.CHANGE_BRANCH}' to '${env.CHANGE_TARGET}'"
+            currentBuild.displayName = "#${env.BUILD_NUMBER} - PR from ${env.CHANGE_BRANCH} to ${env.CHANGE_TARGET}"
+            env.ENV_NAME = env.CHANGE_TARGET
+            env.IS_PR = 'true'
+          } else {
+            echo "🧪 Regular branch build: ${env.BRANCH_NAME}"
+            env.ENV_NAME = env.BRANCH_NAME
+            env.IS_PR = 'false'
+          }
+        }
+      }
+    }
+ 
+    stage('Terraform Plan / Apply') {
+      steps {
+        script {
+          def config = readYaml file: "${YAML_CONFIG}"
+          def envConfig = config[env.ENV_NAME]
+ 
+          if (envConfig == null) {
+ 
+    if (env.BRANCH_NAME.startsWith("feature/")) {
+      echo " No config found for feature branch '${env.BRANCH_NAME}'. Skipping build."
+      currentBuild.result = 'SUCCESS'
+      return
+    } else {
+      error "❌ No config found for environment: ${env.ENV_NAME}"
+    }
+  }
+          envConfig.each { componentName, component ->
+            if (component.enable == true && component.disable == false) {
+              echo "🚀 Running ${env.IS_PR == 'true' ? 'terraform plan' : 'terraform apply'} for: ${componentName}"
+              dir("${component.path}") {
+                sh "terraform init"
+                sh "terraform validate"
+                sh "terraform plan -var-file=${component.tfvars}"
+                if (env.IS_PR != 'true') {
+                  sh "terraform apply -auto-approve -var-file=${component.tfvars}"
+                } else {
+                  echo "💡 PR build: Skipping terraform apply"
+                }
+              }
+            }
+            else if (component.enable == true && component.disable == true) {
+ 
+              echo "⚠️ Running terraform destroy for: ${componentName}"
+ 
+              dir("${component.path}") {
+ 
+                sh "terraform init"
+                sh "terraform validate"
+                sh "terraform plan"
+                if (env.IS_PR != 'true') {
+                  sh "terraform destroy -auto-approve -var-file=${component.tfvars}"
+                } else {
+                  echo "💡 PR build: Skipping terraform destroy"
+                }
+              }
+            }
+            else {
+              echo "⏭️ Skipping ${componentName} (enable: ${component.enable}, disable: ${component.disable})"
+            }
+          }
+        }
+      }
+    }
+  }
+ 
+  post {
+    failure {
+      echo "❌ Build failed!"
+    }
+    success {
+      echo "✅ Build succeeded!"
+    }
+  }
+}
+//test
