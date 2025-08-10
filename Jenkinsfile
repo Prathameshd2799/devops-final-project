@@ -2,7 +2,7 @@ pipeline {
   agent { label 'terraform' } // 🖥️ Run on passive Terraform node
  
   environment {
-    YAML_CONFIG = 'deployment-config.yaml'
+    YAML_CONFIG = 'deployment-config.yml'
   }
  
   stages {
